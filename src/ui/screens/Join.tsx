@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { joinGroup, lookupInvite, type InviteInfo } from '../../data/repo';
 import type { Caregiver, Role } from '../../domain/types';
-import { DisclaimerCheck, DisclaimerText, Field } from '../components/Common';
+import { DisclaimerCheck, DisclaimerText, Field, errorCode } from '../components/Common';
 import { Loading } from './Misc';
 import { navigate } from '../router';
 
@@ -67,7 +67,7 @@ export function Join({
       else setError("This invite link doesn't work anymore. Ask for a new one.");
     } catch (e) {
       console.error(e);
-      setError("Couldn't join. Check your connection and try again.");
+      setError(`Couldn't join. Check your connection and try again. (${errorCode(e)})`);
     } finally {
       setBusy(false);
     }

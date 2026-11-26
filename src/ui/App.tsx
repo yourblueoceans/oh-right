@@ -20,6 +20,7 @@ import { StickerScreen } from './screens/StickerScreen';
 import { Settings } from './screens/Settings';
 import { ReAccept, Removed, MembersOnly, Loading } from './screens/Misc';
 import { Toast, type ToastState } from './components/Toast';
+import { InAppBanner } from './components/Common';
 
 export interface AppCtx {
   user: User;
@@ -81,6 +82,14 @@ export function App() {
 
   const showToast = useCallback((t: ToastState) => setToast(t), []);
 
+  return (
+    <>
+      <InAppBanner />
+      {renderRoute()}
+    </>
+  );
+
+  function renderRoute() {
   // ---------- routing ----------
   if (authError) return <Loading text={`Couldn't start: ${authError}. Check your connection and reload.`} />;
   if (!user || caregiver === undefined) return <Loading />;
@@ -140,4 +149,5 @@ export function App() {
       {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
     </>
   );
+  }
 }

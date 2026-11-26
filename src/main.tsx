@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import { App } from './ui/App';
+import { ErrorBoundary } from './ui/components/ErrorBoundary';
 import { detectInAppBrowser, externalOpenUrl } from './domain/inapp';
 import './styles.css';
 
@@ -21,6 +22,8 @@ try {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

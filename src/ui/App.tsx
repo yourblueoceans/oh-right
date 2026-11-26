@@ -92,7 +92,7 @@ export function App() {
   function renderRoute() {
   // ---------- routing ----------
   if (authError) return <Loading text={`Couldn't start: ${authError}. Check your connection and reload.`} />;
-  if (!user || caregiver === undefined) return <Loading />;
+  if (!user || caregiver === undefined) return <Loading stage={!user ? 'auth' : 'profile'} />;
 
   const hasGroup = !!caregiver?.group_id;
 
@@ -107,11 +107,11 @@ export function App() {
   }
 
   if (caregiver.disclaimer_version !== DISCLAIMER_VERSION) return <ReAccept />;
-  if (!snap || !snap.loaded) return <Loading />;
+  if (!snap || !snap.loaded) return <Loading stage={!gid ? 'confirm' : 'group'} />;
   if (snap.removed) return <Removed />;
 
   const me = snap.members.find((m) => m.caregiver_id === user.uid);
-  if (!me || !snap.group) return <Loading />;
+  if (!me || !snap.group) return <Loading stage="member" />;
 
   const ctx: AppCtx = {
     user,

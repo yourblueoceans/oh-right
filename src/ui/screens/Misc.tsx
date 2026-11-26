@@ -3,7 +3,7 @@ import { acceptDisclaimerAgain, clearMyGroup } from '../../data/repo';
 import { DisclaimerCheck, DisclaimerText } from '../components/Common';
 import { navigate } from '../router';
 
-export function Loading({ text = 'Loading…' }: { text?: string }) {
+export function Loading({ text = 'Loading…', stage }: { text?: string; stage?: string }) {
   // If loading hangs (seen in chat apps' built-in browsers), don't leave a blank-looking page.
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -20,6 +20,7 @@ export function Loading({ text = 'Loading…' }: { text?: string }) {
           <button className="btn btn-secondary" onClick={() => location.reload()}>
             Reload
           </button>
+          {stage && <p className="mono small muted">step: {stage}</p>}
         </div>
       )}
     </main>

@@ -1,12 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { acceptDisclaimerAgain, clearMyGroup } from '../../data/repo';
 import { DisclaimerCheck, DisclaimerText } from '../components/Common';
 import { navigate } from '../router';
 
 export function Loading({ text = 'Loading…' }: { text?: string }) {
+  // If loading hangs (seen in chat apps' built-in browsers), don't leave a blank-looking page.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 12000);
+    return () => clearTimeout(t);
+  }, []);
   return (
     <main className="page center">
       <p className="muted">{text}</p>
+      {slow && (
+        <div data-testid="loading-slow">
+          <p>This is taking longer than usual. Check your connection, then reload.</p>
+          <p className="muted small">If you opened this from a chat app, open the link in Safari or Chrome instead.</p>
+          <button className="btn btn-secondary" onClick={() => location.reload()}>
+            Reload
+          </button>
+        </div>
+      )}
     </main>
   );
 }

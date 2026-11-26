@@ -47,7 +47,7 @@ jobs:
       - if: env.HAS_KEY == 'true'
         run: npm ci && npm run build
       - if: env.HAS_KEY == 'true'
-        name: Deploy to Firebase (Spark plan: hosting + Firestore rules only)
+        name: "Deploy to Firebase (Spark plan: hosting + Firestore rules only)"
         env:
           SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |

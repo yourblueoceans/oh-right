@@ -196,3 +196,7 @@ input, select {
   .print-area { position: absolute; inset: 0; background: #fff; color: #000; }
   .no-print { display: none; }
 }
+
+.inapp { max-width: 528px; margin: calc(8px + env(safe-area-inset-top)) auto 0; width: calc(100% - 32px); }
+.inapp p { margin-bottom: 8px; }
+.inapp .btn { display: inline-block; text-decoration: none; line-height: 26px; }

@@ -2,6 +2,35 @@ import type { ReactNode } from 'react';
 import { DISCLAIMER_CHECKBOX, DISCLAIMER_TEXT } from '../../config';
 import type { ConnState } from '../hooks';
 import { navigate } from '../router';
+import { inAppBrowser } from '../../data/firebase';
+import { externalOpenUrl, isIOS } from '../../domain/inapp';
+
+/** Shown when the page was opened inside a chat app's browser (e.g. KakaoTalk). */
+export function InAppBanner() {
+  if (!inAppBrowser) return null;
+  const target = externalOpenUrl(inAppBrowser, location.href);
+  const browser = isIOS(navigator.userAgent) ? 'Safari' : 'Chrome';
+  return (
+    <div className="banner banner-warn inapp" data-testid="inapp-banner">
+      <p>
+        <strong>Please open this page in {browser}.</strong> Oh Right! may not work inside a chat app's browser.
+        Use the menu (⋯) and choose "Open in {browser}", or copy the link and paste it into {browser}.
+      </p>
+      {target && (
+        <a className="btn btn-secondary btn-sm" href={target}>
+          Open in {browser}
+        </a>
+      )}
+    </div>
+  );
+}
+
+/** Short error code to show with a failure message, so a screenshot tells us what went wrong. */
+export function errorCode(e: unknown): string {
+  const c = (e as { code?: string })?.code;
+  const name = (e as { name?: string })?.name;
+  return c ?? name ?? 'unknown';
+}
 
 export function DisclaimerText() {
   return (

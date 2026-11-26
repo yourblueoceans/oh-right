@@ -20,6 +20,7 @@ import { StickerScreen } from './screens/StickerScreen';
 import { Settings } from './screens/Settings';
 import { ReAccept, Removed, MembersOnly, Loading } from './screens/Misc';
 import { Toast, type ToastState } from './components/Toast';
+import { InAppBanner } from './components/Common';
 
 export interface AppCtx {
   user: User;
@@ -81,9 +82,17 @@ export function App() {
 
   const showToast = useCallback((t: ToastState) => setToast(t), []);
 
+  return (
+    <>
+      <InAppBanner />
+      {renderRoute()}
+    </>
+  );
+
+  function renderRoute() {
   // ---------- routing ----------
   if (authError) return <Loading text={`Couldn't start: ${authError}. Check your connection and reload.`} />;
-  if (!user || caregiver === undefined) return <Loading />;
+  if (!user || caregiver === undefined) return <Loading stage={!user ? 'auth' : 'profile'} />;
 
   const hasGroup = !!caregiver?.group_id;
 
@@ -98,11 +107,11 @@ export function App() {
   }
 
   if (caregiver.disclaimer_version !== DISCLAIMER_VERSION) return <ReAccept />;
-  if (!snap || !snap.loaded) return <Loading />;
+  if (!snap || !snap.loaded) return <Loading stage={!gid ? 'confirm' : 'group'} />;
   if (snap.removed) return <Removed />;
 
   const me = snap.members.find((m) => m.caregiver_id === user.uid);
-  if (!me || !snap.group) return <Loading />;
+  if (!me || !snap.group) return <Loading stage="member" />;
 
   const ctx: AppCtx = {
     user,
@@ -140,4 +149,5 @@ export function App() {
       {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
     </>
   );
+  }
 }

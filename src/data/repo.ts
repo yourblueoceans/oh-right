@@ -235,9 +235,23 @@ export async function joinGroup(args: {
     return 'ok';
   } catch (e) {
     if (!isPermissionDenied(e)) throw e;
+    // An earlier try may already have gone through (e.g. the reply was lost in a chat app's
+    // browser). Then I'm a member and the rules refuse re-adding me: that's success, not "full".
+    if (await isMemberOf(invite.group_id, uid)) {
+      await setDoc(caregiverRef(uid), caregiverWrite(args.displayName, !args.caregiverExists, invite.group_id), { merge: true });
+      return 'ok';
+    }
     // Rules refuse a manager join once 2 managers exist, or when the invite was replaced.
     const still = await lookupInvite(invite.code);
     return still && invite.role === 'manager' ? 'full' : 'invalid';
+  }
+}
+
+async function isMemberOf(gid: string, uid: string): Promise<boolean> {
+  try {
+    return (await getDoc(memberRef(gid, uid))).exists();
+  } catch {
+    return false; // not a member: the rules don't let me read it
   }
 }
 

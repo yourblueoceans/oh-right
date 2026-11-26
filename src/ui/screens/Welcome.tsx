@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createGroup } from '../../data/repo';
 import type { Caregiver } from '../../domain/types';
-import { DisclaimerCheck, DisclaimerText, Field } from '../components/Common';
+import { DisclaimerCheck, DisclaimerText, Field, errorCode } from '../components/Common';
 import { navigate } from '../router';
 
 export function Welcome({ caregiver }: { caregiver: Caregiver | null }) {
@@ -19,7 +19,7 @@ export function Welcome({ caregiver }: { caregiver: Caregiver | null }) {
       navigate('/setup', { replace: true });
     } catch (e) {
       console.error(e);
-      setError("Couldn't create the group. Check your connection and try again.");
+      setError(`Couldn't create the group. Check your connection and try again. (${errorCode(e)})`);
     } finally {
       setBusy(false);
     }

@@ -129,6 +129,28 @@ export async function measureClockOffset(): Promise<void> {
 
 // ---------------------------------------------------------------- group create / join / leave
 
+const invitesRef = (gid: string) => doc(db, 'groups', gid, 'private', 'invites');
+const joinRef = (gid: string, uid: string) => doc(db, 'groups', gid, 'joins', uid);
+
+/** Current invite codes. Managers only: helpers must never be able to read these. */
+export interface GroupInvites {
+  manager: string | null;
+  helper: string | null;
+}
+
+export function subscribeInvites(gid: string, cb: (i: GroupInvites) => void): () => void {
+  return onSnapshot(
+    invitesRef(gid),
+    (s) => cb({ manager: s.get('manager_invite_code') ?? null, helper: s.get('helper_invite_code') ?? null }),
+    (e) => console.error(e),
+  );
+}
+
+async function readInvites(gid: string): Promise<GroupInvites> {
+  const s = await getDoc(invitesRef(gid));
+  return { manager: s.get('manager_invite_code') ?? null, helper: s.get('helper_invite_code') ?? null };
+}
+
 export async function createGroup(args: { displayName: string; groupName: string; caregiverExists: boolean }) {
   const uid = myUid();
   const gid = doc(collection(db, 'groups')).id;
@@ -137,8 +159,6 @@ export async function createGroup(args: { displayName: string; groupName: string
   b.set(caregiverRef(uid), caregiverWrite(args.displayName, !args.caregiverExists, gid), { merge: true });
   b.set(groupRef(gid), {
     name: args.groupName,
-    manager_invite_code: code,
-    helper_invite_code: null,
     helper_invites_enabled: false,
     manager_count: 1,
     created_by: uid,
@@ -149,8 +169,8 @@ export async function createGroup(args: { displayName: string; groupName: string
     display_name: args.displayName,
     role: 'manager',
     joined_at: serverTimestamp(),
-    invite_code: null,
   });
+  b.set(invitesRef(gid), { manager_invite_code: code, helper_invite_code: null });
   b.set(inviteRef(code), {
     group_id: gid,
     group_name: args.groupName,
@@ -183,17 +203,31 @@ export async function lookupInvite(code: string): Promise<InviteInfo | null> {
 
 export type JoinResult = 'ok' | 'full' | 'invalid';
 
-export async function joinGroup(args: { invite: InviteInfo; displayName: string; caregiverExists: boolean }): Promise<JoinResult> {
+/** Remove my membership (and free my manager slot) inside a batch. */
+function addLeave(b: ReturnType<typeof writeBatch>, gid: string, uid: string, role: Role) {
+  b.delete(memberRef(gid, uid));
+  b.delete(joinRef(gid, uid));
+  if (role === 'manager') b.update(groupRef(gid), { manager_count: increment(-1) });
+}
+
+export async function joinGroup(args: {
+  invite: InviteInfo;
+  displayName: string;
+  caregiverExists: boolean;
+  /** The group I'm in now, if any: joining another one leaves it in the same batch. */
+  previous?: { gid: string; role: Role } | null;
+}): Promise<JoinResult> {
   const uid = myUid();
-  const { invite } = args;
+  const { invite, previous } = args;
   const b = writeBatch(db);
+  if (previous && previous.gid !== invite.group_id) addLeave(b, previous.gid, uid, previous.role);
   b.set(caregiverRef(uid), caregiverWrite(args.displayName, !args.caregiverExists, invite.group_id), { merge: true });
+  b.set(joinRef(invite.group_id, uid), { invite_code: invite.code });
   b.set(memberRef(invite.group_id, uid), {
     caregiver_id: uid,
     display_name: args.displayName,
     role: invite.role,
     joined_at: serverTimestamp(),
-    invite_code: invite.code,
   });
   if (invite.role === 'manager') b.update(groupRef(invite.group_id), { manager_count: increment(1) });
   try {
@@ -210,8 +244,7 @@ export async function joinGroup(args: { invite: InviteInfo; displayName: string;
 export async function leaveGroup(gid: string, role: Role): Promise<void> {
   const uid = myUid();
   const b = writeBatch(db);
-  b.delete(memberRef(gid, uid));
-  if (role === 'manager') b.update(groupRef(gid), { manager_count: increment(-1) });
+  addLeave(b, gid, uid, role);
   b.update(caregiverRef(uid), { group_id: null });
   await b.commit();
 }
@@ -222,7 +255,10 @@ export async function clearMyGroup(): Promise<void> {
 }
 
 export async function removeHelper(gid: string, uid: string): Promise<void> {
-  await deleteDoc(memberRef(gid, uid));
+  const b = writeBatch(db);
+  b.delete(memberRef(gid, uid));
+  b.delete(joinRef(gid, uid));
+  await b.commit();
 }
 
 export async function updateMyName(gid: string, name: string): Promise<void> {
@@ -234,18 +270,19 @@ export async function updateMyName(gid: string, name: string): Promise<void> {
 }
 
 export async function renameGroup(group: CareGroup, name: string): Promise<void> {
+  const inv = await readInvites(group.id);
   const b = writeBatch(db);
   b.update(groupRef(group.id), { name });
   // Keep the name shown on the Join screen in sync.
-  if (group.manager_invite_code) b.update(inviteRef(group.manager_invite_code), { group_name: name });
-  if (group.helper_invite_code) b.update(inviteRef(group.helper_invite_code), { group_name: name });
+  if (inv.manager) b.update(inviteRef(inv.manager), { group_name: name });
+  if (inv.helper) b.update(inviteRef(inv.helper), { group_name: name });
   await b.commit();
 }
 
-export async function regenerateManagerInvite(group: CareGroup): Promise<void> {
+export async function regenerateManagerInvite(group: CareGroup, current: GroupInvites): Promise<void> {
   const code = newInviteCode();
   const b = writeBatch(db);
-  if (group.manager_invite_code) b.delete(inviteRef(group.manager_invite_code));
+  if (current.manager) b.delete(inviteRef(current.manager));
   b.set(inviteRef(code), {
     group_id: group.id,
     group_name: group.name,
@@ -253,17 +290,18 @@ export async function regenerateManagerInvite(group: CareGroup): Promise<void> {
     created_by: myUid(),
     created_at: serverTimestamp(),
   });
-  b.update(groupRef(group.id), { manager_invite_code: code });
+  b.set(invitesRef(group.id), { manager_invite_code: code }, { merge: true });
   await b.commit();
 }
 
 /** Premium switch. In the prototype it just turns helper invites on/off without payment. */
-export async function setHelperInvites(group: CareGroup, enabled: boolean): Promise<void> {
+export async function setHelperInvites(group: CareGroup, current: GroupInvites, enabled: boolean): Promise<void> {
   const b = writeBatch(db);
-  if (group.helper_invite_code) b.delete(inviteRef(group.helper_invite_code));
+  if (current.helper) b.delete(inviteRef(current.helper));
   if (enabled) {
     const code = newInviteCode();
-    b.update(groupRef(group.id), { helper_invites_enabled: true, helper_invite_code: code });
+    b.update(groupRef(group.id), { helper_invites_enabled: true });
+    b.set(invitesRef(group.id), { helper_invite_code: code }, { merge: true });
     b.set(inviteRef(code), {
       group_id: group.id,
       group_name: group.name,
@@ -272,7 +310,8 @@ export async function setHelperInvites(group: CareGroup, enabled: boolean): Prom
       created_at: serverTimestamp(),
     });
   } else {
-    b.update(groupRef(group.id), { helper_invites_enabled: false, helper_invite_code: null });
+    b.update(groupRef(group.id), { helper_invites_enabled: false });
+    b.set(invitesRef(group.id), { helper_invite_code: null }, { merge: true });
   }
   await b.commit();
 }
@@ -427,8 +466,6 @@ function toGroup(s: DocumentSnapshot<DocumentData>): CareGroup | null {
   return {
     id: s.id,
     name: d.name,
-    manager_invite_code: d.manager_invite_code ?? null,
-    helper_invite_code: d.helper_invite_code ?? null,
     helper_invites_enabled: !!d.helper_invites_enabled,
     manager_count: d.manager_count ?? 0,
     created_by: d.created_by,
@@ -541,12 +578,13 @@ export function subscribeGroup(
     }, onErr),
   );
 
-  // Last 48 h is enough for today's timeline and for "every N hours" comparisons.
+  // The most recent 300 records: today's timeline plus enough history for "last dose" and
+  // "every N hours" even when a medicine is given only every few days. (A time window would
+  // drop the last dose of a rarely given medicine.) Single-field order: no composite index.
   let liveSince: boolean = false;
-  const since = Timestamp.fromMillis(Date.now() - 48 * 3_600_000);
   unsubs.push(
     onSnapshot(
-      query(collection(db, 'groups', gid, 'doses'), where('given_at', '>=', since), orderBy('given_at', 'desc'), limit(500)),
+      query(collection(db, 'groups', gid, 'doses'), orderBy('given_at', 'desc'), limit(300)),
       opts,
       (s) => {
         cacheFlags.doses = s.metadata.fromCache;

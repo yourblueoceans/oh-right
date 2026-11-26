@@ -7,7 +7,9 @@ rules_version = '2';
 //   caregivers/{uid}                 own profile + disclaimer consent
 //   invites/{code}                   invite links (get by exact code only, never listed)
 //   groups/{gid}                     care group, manager_count keeps the 2-manager cap
-//   groups/{gid}/members/{uid}       role: manager | helper
+//   groups/{gid}/private/invites     current invite codes: managers only (helpers must not see them)
+//   groups/{gid}/joins/{uid}         which invite code someone joined with: managers only
+//   groups/{gid}/members/{uid}       role: manager | helper (no codes here: helpers can read members)
 //   groups/{gid}/patients/{id}
 //   groups/{gid}/medications/{id}
 //   groups/{gid}/doses/{id}          append-only log; undo = status change
@@ -63,15 +65,19 @@ service cloud.firestore {
     match /groups/{gid} {
       allow read: if isMember(gid);
 
+      function groupKeysOk() {
+        return data().keys().hasOnly(['name', 'helper_invites_enabled', 'manager_count', 'created_by', 'created_at']);
+      }
+
       allow create: if signedIn()
+        && groupKeysOk()
         && data().created_by == me()
         && data().manager_count == 1
         && data().helper_invites_enabled == false
-        && data().helper_invite_code == null
         && data().name is string && data().name.size() <= 60
         && isManagerAfter(gid);
 
-      allow update: if
+      allow update: if groupKeysOk() && (
         // Settings changed by a manager (never the counter or the creator).
         (isManager(gid) && !changed().hasAny(['manager_count', 'created_by', 'created_at']))
         // A new manager joins through an invite: counter +1, only while fewer than 2.
@@ -84,7 +90,24 @@ service cloud.firestore {
         || (isManager(gid)
             && changed().hasOnly(['manager_count'])
             && data().manager_count == resource.data.manager_count - 1
-            && !existsAfter(memberPath(gid, me())));
+            && !existsAfter(memberPath(gid, me()))));
+    }
+
+    // ---------- invite codes (managers only) ----------
+    match /groups/{gid}/private/invites {
+      allow read: if isManager(gid);
+      allow create, update: if isManagerAfter(gid)
+        && data().keys().hasOnly(['manager_invite_code', 'helper_invite_code']);
+    }
+
+    // ---------- join receipts: the code someone used, kept away from helpers ----------
+    match /groups/{gid}/joins/{uid} {
+      allow read: if isManager(gid);
+      // Written only in the same batch that creates your membership.
+      allow create, update: if signedIn() && uid == me()
+        && !exists(memberPath(gid, me())) && existsAfter(memberPath(gid, me()))
+        && data().keys().hasOnly(['invite_code']) && data().invite_code is string;
+      allow delete: if signedIn() && (uid == me() || isManager(gid));
     }
 
     // ---------- members ----------
@@ -92,11 +115,13 @@ service cloud.firestore {
       allow read: if isMember(gid);
 
       function inviteOk() {
-        let inv = get(/databases/$(database)/documents/invites/$(data().invite_code));
+        let code = getAfter(/databases/$(database)/documents/groups/$(gid)/joins/$(me())).data.invite_code;
+        let inv = get(/databases/$(database)/documents/invites/$(code));
         return inv.data.group_id == gid && inv.data.role == data().role;
       }
 
       allow create: if signedIn() && mid == me()
+        && data().keys().hasOnly(['caregiver_id', 'display_name', 'role', 'joined_at'])
         && data().caregiver_id == me()
         && validName(data().display_name)
         && data().role in ['manager', 'helper']
@@ -106,10 +131,10 @@ service cloud.firestore {
           (data().role == 'manager' && !exists(groupPath(gid))
              && getAfter(groupPath(gid)).data.created_by == me())
           // Joining with a manager invite: the group counter must go up in the same batch (cap 2).
-          || (data().role == 'manager' && data().invite_code is string && inviteOk()
+          || (data().role == 'manager' && inviteOk()
              && getAfter(groupPath(gid)).data.manager_count == get(groupPath(gid)).data.manager_count + 1)
           // Joining with a helper invite: only while helper invites are switched on.
-          || (data().role == 'helper' && data().invite_code is string && inviteOk()
+          || (data().role == 'helper' && inviteOk()
              && get(groupPath(gid)).data.helper_invites_enabled == true)
         );
 

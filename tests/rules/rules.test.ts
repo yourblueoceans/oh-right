@@ -54,31 +54,32 @@ async function createGroup(uid = 'mom') {
   b.set(doc(d, 'caregivers', uid), caregiver('Mom', GID));
   b.set(doc(d, 'groups', GID), {
     name: "Mia's care team",
-    manager_invite_code: MCODE,
-    helper_invite_code: null,
     helper_invites_enabled: false,
     manager_count: 1,
     created_by: uid,
     created_at: serverTimestamp(),
   });
-  b.set(doc(d, 'groups', GID, 'members', uid), { caregiver_id: uid, display_name: 'Mom', role: 'manager', joined_at: serverTimestamp(), invite_code: null });
+  b.set(doc(d, 'groups', GID, 'members', uid), { caregiver_id: uid, display_name: 'Mom', role: 'manager', joined_at: serverTimestamp() });
+  b.set(doc(d, 'groups', GID, 'private', 'invites'), { manager_invite_code: MCODE, helper_invite_code: null });
   b.set(doc(d, 'invites', MCODE), { group_id: GID, group_name: "Mia's care team", role: 'manager', created_by: uid, created_at: serverTimestamp() });
   await b.commit();
 }
 
-function joinBatch(uid: string, name: string, code: string, role: 'manager' | 'helper', bumpCount = role === 'manager') {
+function joinBatch(uid: string, name: string, code: string, role: 'manager' | 'helper', bumpCount = role === 'manager', gid = GID) {
   const d = db(uid);
   const b = writeBatch(d);
-  b.set(doc(d, 'caregivers', uid), caregiver(name, GID));
-  b.set(doc(d, 'groups', GID, 'members', uid), { caregiver_id: uid, display_name: name, role, joined_at: serverTimestamp(), invite_code: code });
-  if (bumpCount) b.update(doc(d, 'groups', GID), { manager_count: increment(1) });
+  b.set(doc(d, 'caregivers', uid), caregiver(name, gid));
+  b.set(doc(d, 'groups', gid, 'joins', uid), { invite_code: code });
+  b.set(doc(d, 'groups', gid, 'members', uid), { caregiver_id: uid, display_name: name, role, joined_at: serverTimestamp() });
+  if (bumpCount) b.update(doc(d, 'groups', gid), { manager_count: increment(1) });
   return b;
 }
 
 async function enableHelpers() {
   const d = db('mom');
   const b = writeBatch(d);
-  b.update(doc(d, 'groups', GID), { helper_invites_enabled: true, helper_invite_code: HCODE });
+  b.update(doc(d, 'groups', GID), { helper_invites_enabled: true });
+  b.set(doc(d, 'groups', GID, 'private', 'invites'), { helper_invite_code: HCODE }, { merge: true });
   b.set(doc(d, 'invites', HCODE), { group_id: GID, group_name: 'x', role: 'helper', created_by: 'mom', created_at: serverTimestamp() });
   await b.commit();
 }
@@ -141,8 +142,8 @@ describe('group creation and consent', () => {
   it('cannot create a group claiming 2 managers or someone else as creator', async () => {
     const d = db('mom');
     const b = writeBatch(d);
-    b.set(doc(d, 'groups', GID), { name: 'x', manager_invite_code: MCODE, helper_invite_code: null, helper_invites_enabled: false, manager_count: 1, created_by: 'dad', created_at: serverTimestamp() });
-    b.set(doc(d, 'groups', GID, 'members', 'mom'), { caregiver_id: 'mom', display_name: 'Mom', role: 'manager', joined_at: serverTimestamp(), invite_code: null });
+    b.set(doc(d, 'groups', GID), { name: 'x', helper_invites_enabled: false, manager_count: 1, created_by: 'dad', created_at: serverTimestamp() });
+    b.set(doc(d, 'groups', GID, 'members', 'mom'), { caregiver_id: 'mom', display_name: 'Mom', role: 'manager', joined_at: serverTimestamp() });
     await assertFails(b.commit());
   });
 
@@ -358,5 +359,70 @@ describe('leaving and removing (Q14)', () => {
     await createGroup();
     await assertFails(updateDoc(doc(db('mom'), 'groups', GID), { manager_count: 0 }));
     await assertFails(updateDoc(doc(db('stranger'), 'groups', GID), { manager_count: increment(1) }));
+  });
+});
+
+describe('invite codes stay away from helpers (review fix)', () => {
+  it('helpers cannot read current invite codes or join receipts; managers can', async () => {
+    await fullFamily();
+    await assertFails(getDoc(doc(db('grandma'), 'groups', GID, 'private', 'invites')));
+    await assertFails(getDoc(doc(db('grandma'), 'groups', GID, 'joins', 'dad')));
+    await assertFails(getDocs(collection(db('grandma'), 'groups', GID, 'joins')));
+    await assertSucceeds(getDoc(doc(db('dad'), 'groups', GID, 'private', 'invites')));
+    const g = await getDoc(doc(db('grandma'), 'groups', GID));
+    if (JSON.stringify(g.data()).includes(MCODE)) throw new Error('group doc leaks the manager code');
+    const members = await getDocs(collection(db('grandma'), 'groups', GID, 'members'));
+    if (JSON.stringify(members.docs.map((m) => m.data())).includes(MCODE)) throw new Error('members leak the manager code');
+  });
+
+  it('codes cannot be put back on readable documents', async () => {
+    await fullFamily();
+    await assertFails(updateDoc(doc(db('mom'), 'groups', GID), { manager_invite_code: MCODE }));
+    const d = db('aunt');
+    const b = writeBatch(d);
+    b.set(doc(d, 'groups', 'g2'), { name: 'x', helper_invites_enabled: false, manager_count: 1, created_by: 'aunt', created_at: serverTimestamp(), manager_invite_code: 'abc' });
+    b.set(doc(d, 'groups', 'g2', 'members', 'aunt'), { caregiver_id: 'aunt', display_name: 'Aunt', role: 'manager', joined_at: serverTimestamp() });
+    await assertFails(b.commit());
+  });
+
+  it('helpers cannot write invite codes', async () => {
+    await fullFamily();
+    await assertFails(setDoc(doc(db('grandma'), 'groups', GID, 'private', 'invites'), { manager_invite_code: 'newcode12345' }));
+  });
+
+  it('joining without a matching join receipt is refused', async () => {
+    await createGroup();
+    const d = db('dad');
+    const b = writeBatch(d);
+    b.set(doc(d, 'groups', GID, 'members', 'dad'), { caregiver_id: 'dad', display_name: 'Dad', role: 'manager', joined_at: serverTimestamp() });
+    b.update(doc(d, 'groups', GID), { manager_count: increment(1) });
+    await assertFails(b.commit());
+  });
+});
+
+describe('switching groups (review fix)', () => {
+  it('joining another group can release the old membership and manager slot in one batch', async () => {
+    await createGroup('mom');
+    await joinBatch('dad', 'Dad', MCODE, 'manager').commit();
+    // A second group made by someone else, with its own invite.
+    const z = db('zoe');
+    const zb = writeBatch(z);
+    zb.set(doc(z, 'groups', 'g2'), { name: 'Leo', helper_invites_enabled: false, manager_count: 1, created_by: 'zoe', created_at: serverTimestamp() });
+    zb.set(doc(z, 'groups', 'g2', 'members', 'zoe'), { caregiver_id: 'zoe', display_name: 'Zoe', role: 'manager', joined_at: serverTimestamp() });
+    zb.set(doc(z, 'invites', 'zoecode12345'), { group_id: 'g2', group_name: 'Leo', role: 'manager', created_by: 'zoe', created_at: serverTimestamp() });
+    await zb.commit();
+
+    const d = db('dad');
+    const b = writeBatch(d);
+    b.set(doc(d, 'caregivers', 'dad'), caregiver('Dad', 'g2'));
+    b.set(doc(d, 'groups', 'g2', 'joins', 'dad'), { invite_code: 'zoecode12345' });
+    b.set(doc(d, 'groups', 'g2', 'members', 'dad'), { caregiver_id: 'dad', display_name: 'Dad', role: 'manager', joined_at: serverTimestamp() });
+    b.update(doc(d, 'groups', 'g2'), { manager_count: increment(1) });
+    b.delete(doc(d, 'groups', GID, 'members', 'dad'));
+    b.delete(doc(d, 'groups', GID, 'joins', 'dad'));
+    b.update(doc(d, 'groups', GID), { manager_count: increment(-1) });
+    await assertSucceeds(b.commit());
+    // Dad's old slot in Mia's group is free again.
+    await assertSucceeds(joinBatch('aunt', 'Aunt', MCODE, 'manager').commit());
   });
 });

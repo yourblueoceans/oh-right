@@ -16,8 +16,6 @@ export interface Caregiver {
 export interface CareGroup {
   id: string;
   name: string;
-  manager_invite_code: string | null;
-  helper_invite_code: string | null;
   helper_invites_enabled: boolean;
   manager_count: number;
   created_by: string;

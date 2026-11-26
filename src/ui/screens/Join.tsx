@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { joinGroup, lookupInvite, type InviteInfo } from '../../data/repo';
-import type { Caregiver } from '../../domain/types';
+import type { Caregiver, Role } from '../../domain/types';
 import { DisclaimerCheck, DisclaimerText, Field } from '../components/Common';
 import { Loading } from './Misc';
 import { navigate } from '../router';
@@ -9,10 +9,12 @@ export function Join({
   code,
   caregiver,
   currentGroupName,
+  currentRole,
 }: {
   code: string;
   caregiver: Caregiver | null;
   currentGroupName: string | null;
+  currentRole: Role | null;
 }) {
   const [invite, setInvite] = useState<InviteInfo | null | undefined>(undefined);
   const [ok, setOk] = useState(false);
@@ -57,7 +59,8 @@ export function Join({
     setBusy(true);
     setError(null);
     try {
-      const r = await joinGroup({ invite, displayName: trimmed, caregiverExists: !!caregiver });
+      const previous = caregiver?.group_id && currentRole ? { gid: caregiver.group_id, role: currentRole } : null;
+      const r = await joinGroup({ invite, displayName: trimmed, caregiverExists: !!caregiver, previous });
       if (r === 'ok') navigate('/home', { replace: true });
       else if (r === 'full')
         setError('This care group already has 2 managers, the maximum. Ask them to invite you as a helper instead.');
@@ -76,7 +79,7 @@ export function Join({
       <p className="lead">{roleText}</p>
       {caregiver?.group_id && (
         <p className="banner banner-warn">
-          You're already in {currentGroupName ?? 'another care group'} on this phone. Joining will switch you to this one.
+          You're already in {currentGroupName ?? 'another care group'} on this phone. Joining will take you out of that group and into this one.
         </p>
       )}
       <DisclaimerText />

@@ -9,7 +9,9 @@ import {
   removeHelper,
   saveMedication,
   setHelperInvites,
+  subscribeInvites,
   updateMyName,
+  type GroupInvites,
 } from '../../data/repo';
 import { clock } from '../../data/clock';
 import { MAX_MANAGERS } from '../../config';
@@ -64,6 +66,11 @@ export function Settings({ ctx }: { ctx: AppCtx }) {
   const { snap, isManager } = ctx;
   const group = snap.group!;
   const [error, setError] = useState<string | null>(null);
+  const [invites, setInvites] = useState<GroupInvites>({ manager: null, helper: null });
+  useEffect(() => {
+    if (!isManager) return;
+    return subscribeInvites(group.id, setInvites);
+  }, [isManager, group.id]);
   const run = (f: () => Promise<unknown>) => () => {
     setError(null);
     f().catch((e) => {
@@ -102,13 +109,13 @@ export function Settings({ ctx }: { ctx: AppCtx }) {
       {isManager && (
         <section className="section">
           <h2>Invite a manager</h2>
-          {group.manager_count < MAX_MANAGERS && group.manager_invite_code ? (
+          {group.manager_count < MAX_MANAGERS && invites.manager ? (
             <>
               <p className="muted small">
                 Send this link to the other person who manages care. Up to {MAX_MANAGERS} managers per group.
               </p>
-              <CopyRow value={inviteUrl(group.manager_invite_code)} testId="manager-invite" />
-              <button className="btn btn-ghost btn-sm" onClick={run(() => regenerateManagerInvite(group))}>
+              <CopyRow value={inviteUrl(invites.manager)} testId="manager-invite" />
+              <button className="btn btn-ghost btn-sm" onClick={run(() => regenerateManagerInvite(group, invites))}>
                 Make a new link (old one stops working)
               </button>
             </>
@@ -130,13 +137,13 @@ export function Settings({ ctx }: { ctx: AppCtx }) {
             <input
               type="checkbox"
               checked={group.helper_invites_enabled}
-              onChange={(e) => run(() => setHelperInvites(group, e.target.checked))()}
+              onChange={(e) => run(() => setHelperInvites(group, invites, e.target.checked))()}
               data-testid="helper-switch"
             />
             <span>Helper invites (free while testing)</span>
           </label>
-          {group.helper_invites_enabled && group.helper_invite_code && (
-            <CopyRow value={inviteUrl(group.helper_invite_code)} testId="helper-invite" />
+          {group.helper_invites_enabled && invites.helper && (
+            <CopyRow value={inviteUrl(invites.helper)} testId="helper-invite" />
           )}
         </section>
       )}

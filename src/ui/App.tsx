@@ -88,7 +88,8 @@ export function App() {
   const hasGroup = !!caregiver?.group_id;
 
   if (route.name === 'join') {
-    return <Join code={route.code} caregiver={caregiver} currentGroupName={snap?.group?.name ?? null} />;
+    const myRole = snap?.members.find((m) => m.caregiver_id === user.uid)?.role ?? null;
+    return <Join code={route.code} caregiver={caregiver} currentGroupName={snap?.group?.name ?? null} currentRole={myRole} />;
   }
 
   if (!caregiver || !hasGroup) {

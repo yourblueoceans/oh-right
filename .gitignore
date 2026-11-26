@@ -161,3 +161,12 @@ vite.config.ts.timestamp-*
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+
+# Oh Right!
+dist/
+dev-dist/
+test-results/
+playwright-report/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

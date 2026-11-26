@@ -1,0 +1,207 @@
+rules_version = '2';
+
+// Oh Right! security rules. Every permission in docs/spec.md ("권한 규칙") is enforced here,
+// not only by hiding buttons in the UI.
+//
+// Layout
+//   caregivers/{uid}                 own profile + disclaimer consent
+//   invites/{code}                   invite links (get by exact code only, never listed)
+//   groups/{gid}                     care group, manager_count keeps the 2-manager cap
+//   groups/{gid}/members/{uid}       role: manager | helper
+//   groups/{gid}/patients/{id}
+//   groups/{gid}/medications/{id}
+//   groups/{gid}/doses/{id}          append-only log; undo = status change
+//   stickers/{sid}                   top-level so /t/<sid> can be resolved; members only
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function groupPath(gid) { return /databases/$(database)/documents/groups/$(gid); }
+    function memberPath(gid, uid) { return /databases/$(database)/documents/groups/$(gid)/members/$(uid); }
+    function isMember(gid) { return signedIn() && exists(memberPath(gid, me())); }
+    function isManager(gid) { return isMember(gid) && get(memberPath(gid, me())).data.role == 'manager'; }
+    function isManagerAfter(gid) {
+      return signedIn() && existsAfter(memberPath(gid, me()))
+        && getAfter(memberPath(gid, me())).data.role == 'manager';
+    }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function data() { return request.resource.data; }
+    function validName(n) { return n is string && n.size() >= 1 && n.size() <= 20; }
+    function optPositive(v) { return v == null || (v is number && v > 0 && v <= 1000); }
+    function units() { return ['mg', 'mL', 'tablet', 'drop']; }
+
+    // ---------- caregivers ----------
+    match /caregivers/{cid} {
+      allow read: if signedIn() && me() == cid;
+      allow create: if signedIn() && me() == cid
+        && validName(data().display_name)
+        && data().disclaimer_version is string
+        && data().disclaimer_accepted_at == request.time;
+      allow update: if signedIn() && me() == cid
+        && validName(data().display_name)
+        && (!changed().hasAny(['disclaimer_version', 'disclaimer_accepted_at'])
+            || data().disclaimer_accepted_at == request.time);
+    }
+
+    // ---------- invites ----------
+    match /invites/{code} {
+      // Knowing the exact code lets you see the group name on the Join screen. No listing.
+      allow get: if signedIn();
+      allow create: if code.size() >= 10
+        && data().group_id is string
+        && isManagerAfter(data().group_id)
+        && (data().role == 'manager'
+            || (data().role == 'helper'
+                && getAfter(groupPath(data().group_id)).data.helper_invites_enabled == true));
+      allow update: if isManager(resource.data.group_id) && changed().hasOnly(['group_name'])
+        && data().group_name is string && data().group_name.size() <= 60;
+      allow delete: if isManager(resource.data.group_id);
+    }
+
+    // ---------- groups ----------
+    match /groups/{gid} {
+      allow read: if isMember(gid);
+
+      allow create: if signedIn()
+        && data().created_by == me()
+        && data().manager_count == 1
+        && data().helper_invites_enabled == false
+        && data().helper_invite_code == null
+        && data().name is string && data().name.size() <= 60
+        && isManagerAfter(gid);
+
+      allow update: if
+        // Settings changed by a manager (never the counter or the creator).
+        (isManager(gid) && !changed().hasAny(['manager_count', 'created_by', 'created_at']))
+        // A new manager joins through an invite: counter +1, only while fewer than 2.
+        || (signedIn() && !exists(memberPath(gid, me()))
+            && changed().hasOnly(['manager_count'])
+            && resource.data.manager_count < 2
+            && data().manager_count == resource.data.manager_count + 1
+            && isManagerAfter(gid))
+        // A manager leaves: counter -1 in the same batch as removing their membership.
+        || (isManager(gid)
+            && changed().hasOnly(['manager_count'])
+            && data().manager_count == resource.data.manager_count - 1
+            && !existsAfter(memberPath(gid, me())));
+    }
+
+    // ---------- members ----------
+    match /groups/{gid}/members/{mid} {
+      allow read: if isMember(gid);
+
+      function inviteOk() {
+        let inv = get(/databases/$(database)/documents/invites/$(data().invite_code));
+        return inv.data.group_id == gid && inv.data.role == data().role;
+      }
+
+      allow create: if signedIn() && mid == me()
+        && data().caregiver_id == me()
+        && validName(data().display_name)
+        && data().role in ['manager', 'helper']
+        && data().joined_at == request.time
+        && (
+          // The person creating the group becomes its first manager.
+          (data().role == 'manager' && !exists(groupPath(gid))
+             && getAfter(groupPath(gid)).data.created_by == me())
+          // Joining with a manager invite: the group counter must go up in the same batch (cap 2).
+          || (data().role == 'manager' && data().invite_code is string && inviteOk()
+             && getAfter(groupPath(gid)).data.manager_count == get(groupPath(gid)).data.manager_count + 1)
+          // Joining with a helper invite: only while helper invites are switched on.
+          || (data().role == 'helper' && data().invite_code is string && inviteOk()
+             && get(groupPath(gid)).data.helper_invites_enabled == true)
+        );
+
+      // You can change your own display name, nothing else.
+      allow update: if signedIn() && mid == me()
+        && changed().hasOnly(['display_name']) && validName(data().display_name);
+
+      allow delete: if signedIn() && (
+        // Anyone can leave. A leaving manager must also decrement the counter.
+        (mid == me() && (resource.data.role == 'helper'
+          || getAfter(groupPath(gid)).data.manager_count == get(groupPath(gid)).data.manager_count - 1))
+        // Managers can remove helpers, but never another manager (Q14).
+        || (isManager(gid) && resource.data.role == 'helper')
+      );
+    }
+
+    // ---------- patients ----------
+    match /groups/{gid}/patients/{pid} {
+      allow read: if isMember(gid);
+      allow create, update: if isManager(gid)
+        && data().group_id == gid
+        && data().display_name is string && data().display_name.size() >= 1 && data().display_name.size() <= 30;
+    }
+
+    // ---------- medications ----------
+    match /groups/{gid}/medications/{mid} {
+      allow read: if isMember(gid);
+      allow create, update: if isManager(gid)
+        && data().group_id == gid
+        && data().patient_id is string
+        && exists(/databases/$(database)/documents/groups/$(gid)/patients/$(data().patient_id))
+        && data().name is string && data().name.size() >= 1 && data().name.size() <= 60
+        && data().dose_amount is number && data().dose_amount > 0
+        && data().dose_unit in units()
+        && optPositive(data().interval_hours)
+        && (data().max_doses_per_day == null
+            || (data().max_doses_per_day is int && data().max_doses_per_day >= 1 && data().max_doses_per_day <= 48))
+        && data().plan_note is string && data().plan_note.size() <= 200
+        && data().archived is bool;
+      // No delete: archive instead so old records keep their medicine.
+    }
+
+    // ---------- dose events ----------
+    match /groups/{gid}/doses/{did} {
+      allow read: if isMember(gid);
+
+      // Managers and helpers can record, always as themselves.
+      allow create: if isMember(gid)
+        && data().id == did
+        && data().group_id == gid
+        && data().caregiver_id == me()
+        && data().caregiver_name is string
+        && data().patient_id is string
+        && data().medication_id is string
+        && exists(/databases/$(database)/documents/groups/$(gid)/medications/$(data().medication_id))
+        && data().dose_amount is number && data().dose_amount > 0
+        && data().dose_unit in units()
+        && data().given_at is timestamp
+        && data().received_at == request.time
+        && data().source in ['button', 'nfc', 'qr']
+        && (data().sticker_id == null || data().sticker_id is string)
+        && data().status == 'given'
+        && data().undone_at == null && data().undone_by == null
+        && data().notices_shown is list && data().notices_shown.size() <= 4;
+
+      allow update: if
+        // Undo: managers only (their own or anyone's record). Leaves a trace.
+        (isManager(gid)
+          && resource.data.status == 'given'
+          && data().status == 'undone'
+          && changed().hasOnly(['status', 'undone_at', 'undone_by', 'undone_by_name'])
+          && data().undone_by == me()
+          && data().undone_at == request.time
+          && validName(data().undone_by_name))
+        // A network retry of the same create (idempotency): only the server receive time may differ.
+        || (isMember(gid) && resource.data.caregiver_id == me()
+          && changed().hasOnly(['received_at']) && data().received_at == request.time);
+
+      allow delete: if false;
+    }
+
+    // ---------- stickers ----------
+    match /stickers/{sid} {
+      // A non-member (or a wrong id) gets "permission denied" either way, so nothing leaks.
+      allow get, list: if isMember(resource.data.group_id);
+      allow create: if sid.size() >= 10
+        && isManager(data().group_id)
+        && data().medication_id is string
+        && exists(/databases/$(database)/documents/groups/$(data().group_id)/medications/$(data().medication_id))
+        && data().label is string && data().label.size() <= 30;
+      allow update: if isManager(resource.data.group_id) && changed().hasOnly(['label']);
+      allow delete: if isManager(resource.data.group_id);
+    }
+  }
+}

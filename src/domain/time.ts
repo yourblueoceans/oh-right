@@ -48,3 +48,20 @@ export function startOfLocalDay(ms: number): number {
 export function isSameLocalDay(a: number, b: number): boolean {
   return startOfLocalDay(a) === startOfLocalDay(b);
 }
+
+/** Big "time since" display: [["2","h"],["10","m"]] + " ago"; null under a minute. */
+export function elapsedParts(diffMs: number): Array<[string, string]> | null {
+  const diff = Math.max(0, diffMs);
+  if (diff < MIN) return null;
+  if (diff >= 48 * HOUR) return [[String(Math.floor(diff / (24 * HOUR))), 'd']];
+  const h = Math.floor(diff / HOUR);
+  const m = Math.floor((diff % HOUR) / MIN);
+  if (!h) return [[String(m), 'm']];
+  return m ? [[String(h), 'h'], [String(m), 'm']] : [[String(h), 'h']];
+}
+
+/** "You and Dad", "You, Dad and Grandma". */
+export function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}

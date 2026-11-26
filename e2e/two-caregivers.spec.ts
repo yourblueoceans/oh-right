@@ -16,6 +16,7 @@ async function phone(browser: Browser): Promise<{ ctx: BrowserContext; page: Pag
 
 async function createGroupWithAmox(page: Page, name: string) {
   await page.goto('/');
+  await page.getByTestId('start').click();
   await page.getByRole('checkbox').check();
   await page.getByTestId('name-input').fill(name);
   await page.getByTestId('create-group').click();
@@ -93,7 +94,8 @@ test('two caregivers: invite, 3-second sync both ways, notices, undo, stickers, 
       await expect(items(from.page)).toHaveCount(before + 1, { timeout: 300 + 200 /* test overhead */ });
       await expect(items(to.page)).toHaveCount(before + 1, { timeout: SYNC_MS });
       samples.push(Date.now() - t);
-      await expect(items(to.page).first()).toContainText(`Amoxicillin 250 mg · ${who} · Button`);
+      await expect(items(to.page).first()).toContainText(`Amoxicillin 250 mg · ${who}`);
+      await expect(items(to.page).first()).toHaveAttribute('data-source', 'button');
     }
   }
   console.log('sync ms:', samples.join(', '));
@@ -155,7 +157,9 @@ test('two caregivers: invite, 3-second sync both ways, notices, undo, stickers, 
   await dad.page.goto(u.pathname + u.search);
   await expect(dad.page.getByTestId('confirm-title')).toHaveText('Amoxicillin · 250 mg');
   await dad.page.getByTestId('mark-given').click();
-  await expect(items(mom.page).first()).toContainText('Amoxicillin 250 mg · Dad · NFC', { timeout: SYNC_MS });
+  await expect(items(mom.page).first()).toContainText('Amoxicillin 250 mg · Dad', { timeout: SYNC_MS });
+  await expect(items(mom.page).first()).toHaveAttribute('data-source', 'nfc');
+  await expect(items(mom.page).first()).toContainText('Sticker');
   await expect(items(mom.page).first()).toHaveAttribute('data-source', 'nfc');
 
   const q = new URL(qrUrl);

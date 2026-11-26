@@ -4,6 +4,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { App } from './ui/App';
 import { ErrorBoundary } from './ui/components/ErrorBoundary';
 import { detectInAppBrowser, externalOpenUrl } from './domain/inapp';
+import '@fontsource-variable/atkinson-hyperlegible-next/wght.css';
 import './styles.css';
 
 registerSW({ immediate: true });

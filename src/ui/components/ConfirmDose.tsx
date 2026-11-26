@@ -6,6 +6,15 @@ import { clock } from '../../data/clock';
 import { isPermissionDenied, recordDose, undoDose } from '../../data/repo';
 import type { AppCtx } from '../App';
 import { useNow } from '../hooks';
+import { PersonChip, personIndex } from './Common';
+import type { NoticeKind } from '../../domain/types';
+
+const noticeTitle: Record<NoticeKind, string> = {
+  too_soon: 'Earlier than your plan',
+  over_daily: 'More than your daily plan',
+  dose_differs: 'Different dose',
+  also_logged: 'Someone else logged this too',
+};
 
 /**
  * Screen 5 (Confirm). Shared by the home "Log a dose" button and sticker taps.
@@ -74,7 +83,15 @@ export function ConfirmDose({
       <div className="sheet" data-testid="confirm">
         <p className="sheet-kicker">{patient?.display_name ?? ''}</p>
         <h2 className="sheet-title" data-testid="confirm-title">
-          {editing ? med.name : `${med.name} · ${amountText} ${med.dose_unit}`}
+          {editing ? (
+            med.name
+          ) : (
+            <>
+              <span className="sheet-name">{med.name}</span>
+              <span className="vh"> · </span>
+              <span className="sheet-dose">{`${amountText} ${med.dose_unit}`}</span>
+            </>
+          )}
         </h2>
         {editing && (
           <label className="dose-edit">
@@ -83,15 +100,23 @@ export function ConfirmDose({
               autoFocus
               value={amountText}
               onChange={(e) => setAmountText(e.target.value)}
+              aria-label={`Dose in ${med.dose_unit}`}
               data-testid="dose-input"
             />
             <span>{med.dose_unit}</span>
           </label>
         )}
-        <p className="muted" data-testid="confirm-last">
-          {last
-            ? `Last: ${last.caregiver_name} at ${formatClock(last.givenAtMs)} (${formatAgo(last.givenAtMs, now)})`
-            : 'No doses logged yet.'}
+        <p className="sheet-last" data-testid="confirm-last">
+          {last ? (
+            <>
+              <PersonChip name={last.caregiver_name} index={personIndex(ctx.snap.members, last.caregiver_id)} />
+              <span>
+                Last: {last.caregiver_name} at {formatClock(last.givenAtMs)} ({formatAgo(last.givenAtMs, now)})
+              </span>
+            </>
+          ) : (
+            'No doses logged yet.'
+          )}
         </p>
         {med.interval_hours == null && med.max_doses_per_day == null && <p className="muted small">No schedule set</p>}
 
@@ -99,6 +124,7 @@ export function ConfirmDose({
           <div className="notices" data-testid="notices">
             {notices.map((n) => (
               <p key={n.kind} className="notice" data-kind={n.kind}>
+                <span className="notice-title">{noticeTitle[n.kind]}</span>
                 {n.text}
               </p>
             ))}

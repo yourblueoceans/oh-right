@@ -10,6 +10,7 @@ const KAKAO_IOS =
 test('joining from KakaoTalk in-app browser shows the Safari hint and still works', async ({ browser }) => {
   const a = await (await browser.newContext()).newPage();
   await a.goto('/');
+  await a.getByTestId('start').click();
   await a.getByRole('checkbox').check();
   await a.getByTestId('name-input').fill('Mom');
   await a.getByTestId('create-group').click();

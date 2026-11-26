@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveOffset, formatAgo, formatClock, formatDuration, startOfLocalDay } from './time';
+import { effectiveOffset, elapsedParts, formatAgo, formatClock, formatDuration, joinNames, startOfLocalDay } from './time';
 import { parseSource } from './ids';
 
 describe('time', () => {
@@ -36,5 +36,20 @@ describe('time', () => {
     expect(parseSource('?via=qr')).toBe('qr');
     expect(parseSource('')).toBe('qr');
     expect(parseSource('?via=other')).toBe('qr');
+  });
+});
+
+describe('elapsedParts', () => {
+  it('splits hours and minutes for the big display', () => {
+    expect(elapsedParts(30_000)).toBeNull();
+    expect(elapsedParts(12 * 60_000)).toEqual([['12', 'm']]);
+    expect(elapsedParts(2 * 3_600_000 + 10 * 60_000)).toEqual([['2', 'h'], ['10', 'm']]);
+    expect(elapsedParts(3 * 3_600_000)).toEqual([['3', 'h']]);
+    expect(elapsedParts(3 * 24 * 3_600_000)).toEqual([['3', 'd']]);
+  });
+  it('joins names like a sentence', () => {
+    expect(joinNames(['You'])).toBe('You');
+    expect(joinNames(['You', 'Dad'])).toBe('You and Dad');
+    expect(joinNames(['You', 'Dad', 'Grandma'])).toBe('You, Dad and Grandma');
   });
 });

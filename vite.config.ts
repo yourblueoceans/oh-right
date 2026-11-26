@@ -15,8 +15,8 @@ export default defineConfig({
         start_url: '/home',
         scope: '/',
         display: 'standalone',
-        background_color: '#f7f5f0',
-        theme_color: '#2f6f5e',
+        background_color: '#f5f3ed',
+        theme_color: '#f5f3ed',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -27,7 +27,7 @@ export default defineConfig({
         navigateFallback: '/index.html',
         // Firebase Hosting reserved URLs must reach the network.
         navigateFallbackDenylist: [/^\/__\//],
-        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest,woff2}'],
       },
     }),
   ],
